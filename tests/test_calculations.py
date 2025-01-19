@@ -1,7 +1,6 @@
 import pytest
 from app.utils.calculations import calc_stat, stat_modifier, poke_round
-from app.utils.calculations import read_in_pokemon
-from app.utils.calculations import Pokemon, Move, GameState
+from app.utils.calculations import Pokemon, Move, GameState, read_in_pokemon
 
 
 def test_calc_stat_hp():
@@ -56,7 +55,7 @@ def fuecoco():
         "special-defense": 0,
         "speed": 252,
     }
-    return Pokemon("Fuecoco", fuecoco_evs, None)
+    return Pokemon(name="Fuecoco", evs=fuecoco_evs)
 
 
 @pytest.fixture
@@ -69,7 +68,7 @@ def sprigatito():
         "special-defense": 0,
         "speed": 252,
     }
-    return Pokemon("Sprigatito", sprigatito_evs, None)
+    return Pokemon(name="Sprigatito", evs=sprigatito_evs)
 
 
 @pytest.fixture
@@ -82,14 +81,14 @@ def charizard():
         "special-defense": 0,
         "speed": 0,
     }
-    return Pokemon("Charizard", charizard_evs)
+    return Pokemon(name="Charizard", evs=charizard_evs)
 
 
 def test_nature_modifier_increase():
     # test that the nature meodi
 
     # special attack increase
-    pokemon = Pokemon("Charizard", nature="quiet")
+    pokemon = Pokemon(name="Charizard", nature="quiet")
 
     # check that special attack stat is 141
     assert (
@@ -102,7 +101,7 @@ def test_nature_modifier_decrease():
 
     # speed decrease
 
-    pokemon = Pokemon("Charizard", nature="quiet")
+    pokemon = Pokemon(name="Charizard", nature="quiet")
     assert (
         pokemon.trained_stats["speed"] == 108
     ), "Nature modifier isn't decreasing correctly"
@@ -110,46 +109,51 @@ def test_nature_modifier_decrease():
 
 
 def test_calculate_base_damage_sprigatito(sprigatito, fuecoco):
-    tackle = Move("Tackle", "normal", "physical", 40)
-    game_state = GameState(sprigatito, fuecoco, tackle)
-    base_damage_min, base_damage_max = game_state.calculate_modified_damage()
-
-    # damage should be 22 min, 27 max
-    assert (
-        base_damage_min == 22 and base_damage_max == 27
-    ), "Base damage calculation is wrong for Sprigatito"
+    game_state = GameState(
+        p1=sprigatito, p2=fuecoco, action="attack", move=Move.from_name("Tackle")
+    )
+    result = game_state.execute_action()
+    assert result["min_damage"] == 22
+    assert result["max_damage"] == 27
 
 
 def test_calculate_damage_sun_fire(charizard, sprigatito):
-
-    fire_move = Move("Fire Blast", "fire", "special", 110)
-    game_state = GameState(charizard, sprigatito, fire_move, weather="sun")
-
-    base_damage_min, base_damage_max = game_state.calculate_modified_damage()
-
-    assert (
-        base_damage_min == 458 and base_damage_max == 542
-    ), "Base damage calculation is wrong for Charizard in Sun with Fire Blast"
+    game_state = GameState(
+        p1=charizard,
+        p2=sprigatito,
+        action="attack",
+        move=Move.from_name("Fire Blast"),
+        weather="sun",
+    )
+    result = game_state.execute_action()
+    assert result["min_damage"] == 458
+    assert result["max_damage"] == 542
 
 
 # write test for same scenario, but rain instead of sun
 def test_calculate_base_damage_rain_fire(charizard, sprigatito):
-
-    fire_move = Move("Fire Blast", "fire", "special", 110)
-    game_state = GameState(charizard, sprigatito, fire_move, weather="rain")
-
-    base_damage_min, base_damage_max = game_state.calculate_modified_damage()
-
+    game_state = GameState(
+        p1=charizard,
+        p2=sprigatito,
+        action="attack",
+        move=Move.from_name("Fire Blast"),
+        weather="rain",
+    )
+    result = game_state.calculate_modified_damage()
     assert (
-        base_damage_min == 152 and base_damage_max == 180
+        result["min_damage"] == 152 and result["max_damage"] == 180
     ), "Base damage calculation is wrong for Charizard in Rain with Fire Blast"
 
 
 def test_calculate_damage_fully_loaded(charizard, sprigatito):
     # mean to activate as many modifiers as possible
-
-    fire_move = Move("Fire Blast", "fire", "special", 110)
-    game_state = GameState(charizard, sprigatito, fire_move, weather="rain")
+    game_state = GameState(
+        p1=charizard,
+        p2=sprigatito,
+        action="attack",
+        move=Move.from_name("Fire Blast"),
+        weather="rain",
+    )
 
     # charizard modifiers
     charizard.stat_stages = {"special-attack": 2}
@@ -163,12 +167,10 @@ def test_calculate_damage_fully_loaded(charizard, sprigatito):
     sprigatito.tera_type = "water"
     sprigatito.item = "av"
 
-    base_damage_min, base_damage_max = game_state.calculate_modified_damage(
-        verbose=True
-    )
+    result = game_state.calculate_modified_damage(verbose=True)
 
     assert (
-        base_damage_min == 68 and base_damage_max == 81
+        result["min_damage"] == 68 and result["max_damage"] == 81
     ), "Base damage calculation is wrong for Charizard in Rain with Fire Blast"
 
 
@@ -176,3 +178,72 @@ def test_calculate_damage_fully_loaded(charizard, sprigatito):
 
 
 # Critical Hit
+
+
+@pytest.fixture
+def finneon():
+    return Pokemon(name="finneon", evs={"speed": 230})
+
+
+@pytest.fixture
+def meowth():
+    return Pokemon(name="meowth", evs={"speed": 215})
+
+
+@pytest.fixture
+def salamence():
+    return Pokemon(name="salamence", evs={"speed": 252})
+
+
+@pytest.fixture
+def talonflame():
+    return Pokemon(name="talonflame", evs={"speed": 248})
+
+
+@pytest.fixture
+def iron_bundle():
+    return Pokemon(name="iron-bundle", evs={"speed": 252})
+
+
+@pytest.fixture
+def flutter_mane():
+    return Pokemon(name="flutter-mane", evs={"speed": 252})
+
+
+@pytest.fixture
+def quaxly():
+    return Pokemon(name="quaxly", evs={"speed": 4}, stat_stages={"speed": 2})
+
+
+def test_speed_check_finneon_meowth(finneon, meowth):
+    game_state = GameState(p1=finneon, p2=meowth, action="speed_check")
+    result = game_state._check_speed()
+    assert result["p1_final_speed"] == 115
+    assert result["p2_final_speed"] == 137
+    assert result["result"] == "p2_faster"
+
+
+def test_speed_check_salamence_talonflame(salamence, talonflame):
+    game_state = GameState(p1=salamence, p2=talonflame, action="speed_check")
+    result = game_state._check_speed()
+    assert result["p1_final_speed"] == 152
+    assert result["p2_final_speed"] == 177
+    assert result["result"] == "p2_faster"
+
+
+def test_speed_check_iron_bundle_flutter_mane(iron_bundle, flutter_mane):
+    game_state = GameState(p1=iron_bundle, p2=flutter_mane, action="speed_check")
+    result = game_state._check_speed()
+    assert result["p1_final_speed"] == 188
+    assert result["p2_final_speed"] == 187
+    assert result["result"] == "p1_faster"
+
+
+def test_speed_check_boosted_fuecoco_quaxly(fuecoco, quaxly):
+    game_state = GameState(p1=fuecoco, p2=quaxly, action="speed_check")
+    result = game_state._check_speed()
+    assert result["p1_final_speed"] == 144
+    assert result["p2_final_speed"] == 142
+    assert result["result"] == "p1_faster"
+    assert result["p1_stat_changes"] == 2
+    assert result["p2_stat_changes"] == 2

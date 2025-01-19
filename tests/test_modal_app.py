@@ -15,14 +15,6 @@ from supabase import create_client
 sb_url = st.secrets["SUPABASE_URL"]
 sb_key = st.secrets["SUPABASE_KEY"]
 
-# we need to test the inference endpoint from Modal
-
-# we need to test that the calc prompted from the inference endpoint ends up correct
-
-# we need to test the intent classifier from Cohere
-
-# We just intend to test these endpoints to make sure they are working properly
-
 
 @pytest.fixture
 def test_data():

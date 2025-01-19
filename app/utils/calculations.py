@@ -1,14 +1,15 @@
 import math
 import editdistance
 import jsonlines
-import ast
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 from .consts import (
     offensive_type_resistance,
     offensive_type_effectiveness,
     offensive_type_immunities,
     natures,
 )
+from pydantic import BaseModel, Field, field_validator, ConfigDict
+import json
 
 # class based implementation of pokemon calculator
 # TODO: Add in terrain modifications
@@ -17,43 +18,66 @@ from .consts import (
 MOVE_DATA_PATH = "./data/move_data.jsonl"
 
 
-class Pokemon:
-    # contains all relevant information about a pokemon
+class Pokemon(BaseModel):
+    name: str
+    evs: Optional[Dict[str, int]] = None
+    nature: Optional[str] = None
+    tera_type: Optional[str] = None
+    tera_active: bool = False
+    status: Optional[str] = None
+    stat_stages: Dict[str, int] = Field(
+        default_factory=dict
+    )  # Initialize as empty dict
+    item: Optional[str] = None
 
-    def __init__(
-        self,
-        name: str,
-        evs: Dict[str, int] = None,
-        nature: Optional[str] = None,
-        tera_type: Optional[str] = None,
-        tera_active: Optional[bool] = False,
-        status: Optional[str] = None,
-        stat_stages: Optional[Dict[str, int]] = None,
-        item: Optional[str] = None,
-    ):
-        self.name = name
-        # evs is a dictionary mapping stat to ev
-        self.evs = evs
-        self.nature = nature
-        self.tera_type = tera_type
-        self.tera_active = tera_active
-        self.status = status
-        # also a dictionary, mapping stat to stat stage
-        self.stat_stages = stat_stages
-        self.item = item
+    # Computed fields
+    types: List[str] = []
+    stats: Dict[str, int] = {}
+    trained_stats: Dict[str, int] = {}
 
-        pokemon = lookup_pokemon(name, read_in_pokemon("./data/gen9_pokemon.jsonl"))
-        # get types
-        types = pokemon["types"]
-        if isinstance(types, str):
-            types = [types]
-        self.types = types
-        # get stats
-        self.stats = {x["stat"]["name"]: x["base_stat"] for x in pokemon["stats"]}
-        # upgrade stats based on evs
-        self.trained_stats = create_trained_stats(
-            self.evs, self.stats, nature=self.nature
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @field_validator("evs")
+    def validate_evs(cls, v):
+        if v is None:
+            return create_empty_ev_spread()
+        for stat, value in v.items():
+            if not 0 <= value <= 252:
+                raise ValueError(f"EV for {stat} must be between 0 and 252")
+        return v
+
+    @field_validator("nature")
+    def validate_nature(cls, v):
+        if v is not None and v not in natures:
+            raise ValueError(f"Invalid nature: {v}")
+        return v
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        pokemon = lookup_pokemon(
+            self.name, read_in_pokemon("./data/gen9_pokemon.jsonl")
         )
+        if pokemon:
+            # Set types
+            types = pokemon["types"]
+            self.types = [types] if isinstance(types, str) else types
+            # Set stats
+            self.stats = {x["stat"]["name"]: x["base_stat"] for x in pokemon["stats"]}
+            # Set trained stats
+            self.trained_stats = create_trained_stats(self.evs, self.stats, self.nature)
+
+            # Initialize missing stat stages with 0
+            default_stages = {
+                "attack": 0,
+                "defense": 0,
+                "special-attack": 0,
+                "special-defense": 0,
+                "speed": 0,
+            }
+            if self.stat_stages:
+                # Update default stages with any provided values
+                default_stages.update(self.stat_stages)
+            self.stat_stages = default_stages
 
     def stat_stage_increase(self, stat: str, num_stages: int):
         # when a pokemon's stat increases, modify the stat and the stage_stages
@@ -92,56 +116,124 @@ class Pokemon:
         # fill in stat distributions
 
 
-class Move:
-    # contains all relevant information about a move
-
-    def __init__(
-        self,
-        name: Optional[str] = None,
-        type: Optional[str] = None,
-        category: Optional[str] = None,
-        base_power: Optional[int] = None,
-        priority: Optional[int] = 0,
-        description: Optional[str] = None,
-    ):
-        self.name = name
-        self.type = type
-        self.category = category
-        self.base_power = base_power
-        self.priority = priority
-        self.description = description
+class Move(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    category: Optional[str] = None
+    base_power: Optional[int] = Field(default=None, ge=0)
+    priority: int = 0
+    description: Optional[str] = None
 
     @classmethod
     def from_name(cls, name: str):
-        # given move name, return move
-        moves = read_in_moves(MOVE_DATA_PATH)
-        selected_move = None
-        for move in moves:
-            if move["name"] == name:
-                selected_move = move
-                return Move(**selected_move)
-        if selected_move is None:
-            raise ValueError(f"Move {name} not found")
+        # Convert spaces to hyphens and make lowercase
+        formatted_name = name.lower().replace(" ", "-")
+
+        # Read from move_data.jsonl
+        with open("data/move_data.jsonl", "r") as f:
+            for line in f:
+                move = json.loads(line)
+                if move["name"] == formatted_name:  # Compare with formatted name
+                    return cls(
+                        name=move["name"],
+                        base_power=move[
+                            "power"
+                        ],  # Note: this can be None for some moves
+                        category=move["category"],
+                        type=move["type"],
+                    )
+
+        raise ValueError(
+            f"Move {name} (formatted as '{formatted_name}') not found in move database"
+        )
 
 
-class GameState:
-    # contains all relevant information about the game state
+class GameState(BaseModel):
+    p1: Pokemon
+    p2: Pokemon
+    move: Optional[Move] = None
+    action: str = "attack"
+    weather: Optional[str] = None
+    terrain: Optional[str] = None
+    critical_hit: bool = False
+    action_params: Optional[Dict[str, Any]] = None
 
-    def __init__(
-        self,
-        p1: Pokemon,
-        p2: Pokemon,
-        move: Move,
-        weather: Optional[str] = None,
-        terrain: Optional[str] = None,
-        critical_hit: Optional[bool] = False,
-    ):
-        self.p1 = p1
-        self.p2 = p2
-        self.move = move
-        self.weather = weather
-        self.terrain = terrain
-        self.critical_hit = False
+    @field_validator("weather")
+    def validate_weather(cls, v):
+        valid_weather = ["sun", "rain", "sand", "hail", None]
+        if v not in valid_weather:
+            raise ValueError(f"Invalid weather: {v}")
+        return v
+
+    @field_validator("terrain")
+    def validate_terrain(cls, v):
+        valid_terrain = ["electric", "grassy", "misty", "psychic", None]
+        if v not in valid_terrain:
+            raise ValueError(f"Invalid terrain: {v}")
+        return v
+
+    @field_validator("action")
+    def validate_action(cls, v):
+        valid_actions = ["attack", "speed_check", "train"]
+        if v not in valid_actions:
+            raise ValueError(f"Invalid action: {v}")
+        return v
+
+    def _check_speed(self) -> dict:
+        """Perform speed comparison between p1 and p2"""
+        p1_speed = self.p1.trained_stats["speed"]
+        p2_speed = self.p2.trained_stats["speed"]
+
+        # Apply stat stage changes if they exist
+        # Remove the None check since stat_stages is now initialized as empty dict
+        p1_stat_changes = self.p1.stat_stages.get("speed", 0)
+        p2_stat_changes = self.p2.stat_stages.get("speed", 0)
+
+        p1_final_speed = stat_modifier(num_stages=p1_stat_changes, stat=p1_speed)
+        p2_final_speed = stat_modifier(num_stages=p2_stat_changes, stat=p2_speed)
+
+        result = {
+            "p1": self.p1.name,
+            "p2": self.p2.name,
+            "p1_final_speed": p1_final_speed,
+            "p2_final_speed": p2_final_speed,
+            "p1_stat_changes": p1_stat_changes,  # This was the key issue
+            "p2_stat_changes": p2_stat_changes,
+            "p1_ev": self.p1.evs["speed"] if self.p1.evs else 0,
+            "p2_ev": self.p2.evs["speed"] if self.p2.evs else 0,
+        }
+
+        # Add who's faster to the result
+        if p1_final_speed == p2_final_speed:
+            result["result"] = "speed_tie"
+            result["message"] = f"Speed Tie, with both pokemon at {p1_final_speed}"
+        elif p1_final_speed > p2_final_speed:
+            result["result"] = "p1_faster"
+            result[
+                "message"
+            ] = f"{self.p1.name} speed stat is {p1_final_speed}, which is faster than {self.p2.name} at {p2_final_speed}"
+        else:
+            result["result"] = "p2_faster"
+            result[
+                "message"
+            ] = f"{self.p1.name} speed stat is {p1_final_speed}, which is slower than {self.p2.name} at {p2_final_speed}"
+
+        return result
+
+    def execute_action(self) -> dict:
+        """Route to appropriate calculation based on action"""
+        action_map = {
+            "attack": self.calculate_modified_damage,
+            "speed_check": self._check_speed,
+            "train": lambda: calculate_optimal_evs(
+                self, self.action_params.get("criteria", {})
+            ),
+        }
+
+        if self.action not in action_map:
+            raise ValueError(f"Unknown action: {self.action}")
+
+        return action_map[self.action]()
 
     def calculate_base_damage(self):
         # given args, calculatse base damage of attack
@@ -251,7 +343,10 @@ class GameState:
 
         # final modifier/special cases
 
-        return (final_damage_min, final_damage_max)
+        return {
+            "min_damage": int(final_damage_min),  # Ensure integers
+            "max_damage": int(final_damage_max),
+        }
 
 
 def verbose_print(verbose, result, message=""):
@@ -580,101 +675,72 @@ def extract_stat(p, stat):
     return list(filter(lambda x: x["stat"]["name"] == stat, p["stats"]))[0]["base_stat"]
 
 
-def speed_check(p1, p2, f, p1_stat_changes=0, p2_stat_changes=0, p1_ev=252, p2_ev=252):
-    # given game state for changes, check if p1 stat outspeeds p2 stat
-
-    pokemon_one = lookup_pokemon(p1.lower(), f)
-    pokemon_two = lookup_pokemon(p2.lower(), f)
-
-    # check if either pokemon is None
-    # if so, return a failure message
-
-    if pokemon_one is None:
-        return f"{p1} is not a valid pokemon"
-    if pokemon_two is None:
-        return f"{p2} is not a valid pokemon"
-
-    # from pokemon extract stat
-    p1_speed = extract_stat(pokemon_one, "speed")
-    p2_speed = extract_stat(pokemon_two, "speed")
-
-    # we can now calculate speed stat after evs and ivs
-    p1_final_speed = calc_stat(level=50, base=p1_speed, ev=p1_ev, iv=31)
-    p2_final_speed = calc_stat(level=50, base=p2_speed, ev=p2_ev, iv=31)
-
-    # now we can apply stat changes
-    p1_final_speed = stat_modifier(num_stages=p1_stat_changes, stat=p1_final_speed)
-    p2_final_speed = stat_modifier(num_stages=p2_stat_changes, stat=p2_final_speed)
-
-    # we have all info to compare the two pokemon
-
-    # return a dictionary with all function parameters AND the final speeds of each pokemon
-
-    final_calculation = {
-        "p1": pokemon_one["name"],
-        "p2": pokemon_two["name"],
-        "p1_final_speed": p1_final_speed,
-        "p2_final_speed": p2_final_speed,
-        "p1_stat_changes": p1_stat_changes,
-        "p2_stat_changes": p2_stat_changes,
-        "p1_ev": p1_ev,
-        "p2_ev": p2_ev,
-    }
-    return final_calculation
-
-
-def speed_check_statement(final_calculation):
-    # given final calculation, return a statement the bot responds with
-    p1 = final_calculation["p1"]
-    p2 = final_calculation["p2"]
-    p1_final_speed = final_calculation["p1_final_speed"]
-    p2_final_speed = final_calculation["p2_final_speed"]
-
-    if p1_final_speed == p2_final_speed:
-        return f"Speed Tie, with both pokemon at {p1_final_speed}", "speed_tie"
-    elif p1_final_speed < p2_final_speed:
-        return (
-            f"{p1} speed stat is {p1_final_speed}, which is slower than {p2} at {p2_final_speed}",
-            p2,
-        )
-
-    return (
-        f"{p1} speed stat is {p1_final_speed}, which is faster than {p2} at {p2_final_speed}",
-        p1,
+def calculate_optimal_evs(game_state: GameState) -> List[Dict]:
+    """
+    Calculates optimal EVs for 1hko for the attacking pokemon
+    """
+    results = []
+    criteria = (
+        game_state.action_params.get("criteria", "1hko")
+        if game_state.action_params
+        else "1hko"
     )
 
+    higher_stat_name = (
+        "attack" if game_state.move.category == "physical" else "special-attack"
+    )
 
-def formatted_speed_check(arg_strings, f):
-    # take arg_strings and format it into a dictionary for speed_check
+    # Calculate remaining EVs
+    if game_state.p1.evs:
+        evs_remaining = min(508 - sum(game_state.p1.evs.values()), 252)
+    else:
+        evs_remaining = 252
 
-    speed_check_dict = ast.literal_eval(arg_strings)
+    # Determine minimum damage needed
+    damage_min = (
+        round(game_state.p2.trained_stats["hp"] / 2)
+        if criteria == "2hko"
+        else game_state.p2.trained_stats["hp"]
+    )
 
-    p1 = check_if_exists(speed_check_dict, "p1")
-    p2 = check_if_exists(speed_check_dict, "p2")
-    p1_stat_changes = check_if_exists(speed_check_dict, "p1_stat_changes")
-    p2_stat_changes = check_if_exists(speed_check_dict, "p2_stat_changes")
-    p1_ev = check_if_exists(speed_check_dict, "p1_ev")
-    p2_ev = check_if_exists(speed_check_dict, "p2_ev")
-    print("Pokemons extracted successfully!")
+    # Store original EVs to restore later
+    original_evs = game_state.p1.evs.copy() if game_state.p1.evs else None
 
-    # wrap above variables into a dictionary, to pass to speed_check
-    speed_check_dict = {
-        "p1": p1,
-        "p2": p2,
-        "p1_stat_changes": p1_stat_changes,
-        "p2_stat_changes": p2_stat_changes,
-        "p1_ev": p1_ev,
-        "p2_ev": p2_ev,
-        "f": f,
-    }
+    # Find optimal EVs through binary search
+    low = 0
+    high = evs_remaining
+    optimal_evs = None
 
-    # pass speed_check_dict to speed_check
-    speed_check_calcs = speed_check(**speed_check_dict)
+    while low <= high:
+        mid = (low + high) // 4 * 4  # Ensure we're using multiples of 4
+        game_state.p1.retrain(stat=higher_stat_name, ev=mid)
+        result = game_state.execute_action()
+        min_damage = (
+            result[0] if isinstance(result, tuple) else result.get("min_damage", 0)
+        )
 
-    speed_check_string, r = speed_check_statement(speed_check_calcs)
+        if min_damage >= damage_min:
+            optimal_evs = mid
+            high = mid - 4
+        else:
+            low = mid + 4
 
-    return speed_check_string, speed_check_calcs, r
+    # Restore original EVs
+    if original_evs:
+        for stat, ev in original_evs.items():
+            game_state.p1.retrain(stat=stat, ev=ev)
 
+    # If no solution found, use max EVs
+    if optimal_evs is None:
+        optimal_evs = evs_remaining
 
-def check_if_exists(d, arg):
-    return d[arg] if arg in d.keys() else ""
+    results.append(
+        {
+            "evs_invested": optimal_evs,
+            "stat": higher_stat_name,
+            "training": "optimal",
+            "criteria": criteria,
+        }
+    )
+
+    return results

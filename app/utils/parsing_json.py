@@ -1,51 +1,38 @@
-from .train_pokemon import calculate_optimal_evs
+from typing import Dict, Any
 from .calculations import GameState, Pokemon, Move
 import json
 
-"""Contains code to parse JSON into gamestate and action objects"""
-# checks I need to add:
-# check if json is valid using json schema
-# ensure that code doesn't break if game state is not in the json, it's possible to not have initalized a game state with special conditions
-# ensure that code doesn't break if action is not in the json, it's possible to not have initalized any action
+
+def parse_gamestate(json_data: str) -> GameState:
+    data = json.loads(json_data)
+
+    # Create Pokemon instances with stat stages
+    p1_data = data["p1"]
+    p2_data = data["p2"]
+
+    p1 = Pokemon(
+        name=p1_data["name"],
+        evs=p1_data.get("evs"),
+        stat_stages=p1_data.get("stat_stages"),
+    )
+
+    p2 = Pokemon(
+        name=p2_data["name"],
+        evs=p2_data.get("evs"),
+        stat_stages=p2_data.get("stat_stages"),
+    )
+
+    return GameState(
+        p1=p1,
+        p2=p2,
+        action=data["action"],
+        move=Move.from_name(data.get("move")) if data.get("move") else None,
+        weather=data.get("weather"),
+        terrain=data.get("terrain"),
+    )
 
 
-# should I need tests for json stuff if I check schema?
-
-
-def json_to_gamestate(j):
-    # given json, return gamestate object
-    # We assume the JSON has keys for p1, p2, move, and gamestate arguments
-    j = json.loads(j)
-
-    pokemon_one = Pokemon(**j["p1"])
-    pokemon_two = Pokemon(**j["p2"])
-
-    move = Move.from_name(**j["move"])
-    # check if gamestate is in the json
-    if "gamestate" not in j:
-        return GameState(pokemon_one, pokemon_two, move)
-    gamestate = GameState(pokemon_one, pokemon_two, move, **j["gamestate"])
-    return gamestate
-
-
-def json_to_action(j):
-    # Given a json, return the appropriate action's results
-    # retrieve gamestate from json
-    gamestate = json_to_gamestate(j)
-    # based on action attribute in json, return the appropriate action
-    # train
-    print(gamestate.move)
-    j = json.loads(j)
-    action_results = ""
-    train_actions = ["train", "calculate", "\train", "/train"]
-    print(j["action"]["name"])
-    if j["action"]["name"] in train_actions:
-        # calculate optimal evs for 1hko
-        # args so that we can use the same function for all actions
-        action_results = calculate_optimal_evs(
-            gamestate, j["action"]["args"]["criteria"]
-        )
-
-    # other actions that are not avail yet...
-
-    return action_results
+def execute_from_json(json_data: str) -> Dict[str, Any]:
+    """Parse JSON and execute the specified action"""
+    gamestate = parse_gamestate(json_data)
+    return gamestate.execute_action()

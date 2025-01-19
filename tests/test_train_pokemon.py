@@ -1,6 +1,5 @@
 import pytest
-from app.utils.train_pokemon import calculate_optimal_evs
-from app.utils.calculations import Pokemon, Move, GameState
+from app.utils.calculations import Pokemon, Move, GameState, calculate_optimal_evs
 import pandas as pd
 
 # This will will test the train_pokemon script
@@ -18,7 +17,7 @@ def charizard():
         "special-defense": 0,
         "speed": 0,
     }
-    return Pokemon("Charizard", charizard_evs, None)
+    return Pokemon(name="Charizard", evs=charizard_evs, nature=None)
 
 
 @pytest.fixture
@@ -31,12 +30,12 @@ def eevee():
         "special-defense": 0,
         "speed": 0,
     }
-    return Pokemon("Eevee", eevee_evs, None)
+    return Pokemon(name="Eevee", evs=eevee_evs, nature=None)
 
 
 def test_optimal_ev_ohko(charizard, eevee):
     # test ohko
-    move = Move("Overheat", "fire", "special", 130)
-    practice_gamestate = GameState(charizard, eevee, move)
+    move = Move(name="Overheat", type="fire", category="special", base_power=130)
+    practice_gamestate = GameState(p1=charizard, p2=eevee, move=move)
     results = pd.DataFrame(calculate_optimal_evs(practice_gamestate))
     assert results[results["training"] == "optimal"].evs_invested.iloc[0] == 172
