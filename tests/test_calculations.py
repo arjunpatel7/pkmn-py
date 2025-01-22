@@ -55,7 +55,8 @@ def fuecoco():
         "special-defense": 0,
         "speed": 252,
     }
-    return Pokemon(name="Fuecoco", evs=fuecoco_evs)
+    pokemon = Pokemon(name="Fuecoco", evs=fuecoco_evs, stat_stages={"speed": 2})
+    return pokemon
 
 
 @pytest.fixture
@@ -242,7 +243,7 @@ def test_speed_check_iron_bundle_flutter_mane(iron_bundle, flutter_mane):
 def test_speed_check_boosted_fuecoco_quaxly(fuecoco, quaxly):
     game_state = GameState(p1=fuecoco, p2=quaxly, action="speed_check")
     result = game_state._check_speed()
-    assert result["p1_final_speed"] == 144
+    assert result["p1_final_speed"] == 176
     assert result["p2_final_speed"] == 142
     assert result["result"] == "p1_faster"
     assert result["p1_stat_changes"] == 2

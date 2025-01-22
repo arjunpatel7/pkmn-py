@@ -1,7 +1,7 @@
 import math
 import editdistance
 import jsonlines
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, ClassVar
 from .consts import (
     offensive_type_resistance,
     offensive_type_effectiveness,
@@ -25,9 +25,17 @@ class Pokemon(BaseModel):
     tera_type: Optional[str] = None
     tera_active: bool = False
     status: Optional[str] = None
+    DEFAULT_STAT_STAGES: ClassVar[Dict[str, int]] = {
+        "attack": 0,
+        "defense": 0,
+        "special-attack": 0,
+        "special-defense": 0,
+        "speed": 0,
+    }
+    # updated specified stats only
     stat_stages: Dict[str, int] = Field(
-        default_factory=dict
-    )  # Initialize as empty dict
+        default_factory=lambda: Pokemon.DEFAULT_STAT_STAGES.copy()
+    )
     item: Optional[str] = None
 
     # Computed fields
@@ -53,6 +61,13 @@ class Pokemon(BaseModel):
         return v
 
     def __init__(self, **data):
+        # If stat_stages is provided, merge it with defaults instead of replacing
+        if "stat_stages" in data:
+            partial_stages = data["stat_stages"]
+            full_stages = Pokemon.DEFAULT_STAT_STAGES.copy()
+            full_stages.update(partial_stages)
+            data["stat_stages"] = full_stages
+
         super().__init__(**data)
         pokemon = lookup_pokemon(
             self.name, read_in_pokemon("./data/gen9_pokemon.jsonl")
@@ -65,19 +80,6 @@ class Pokemon(BaseModel):
             self.stats = {x["stat"]["name"]: x["base_stat"] for x in pokemon["stats"]}
             # Set trained stats
             self.trained_stats = create_trained_stats(self.evs, self.stats, self.nature)
-
-            # Initialize missing stat stages with 0
-            default_stages = {
-                "attack": 0,
-                "defense": 0,
-                "special-attack": 0,
-                "special-defense": 0,
-                "speed": 0,
-            }
-            if self.stat_stages:
-                # Update default stages with any provided values
-                default_stages.update(self.stat_stages)
-            self.stat_stages = default_stages
 
     def stat_stage_increase(self, stat: str, num_stages: int):
         # when a pokemon's stat increases, modify the stat and the stage_stages
@@ -185,20 +187,19 @@ class GameState(BaseModel):
         p2_speed = self.p2.trained_stats["speed"]
 
         # Apply stat stage changes if they exist
-        # Remove the None check since stat_stages is now initialized as empty dict
-        p1_stat_changes = self.p1.stat_stages.get("speed", 0)
-        p2_stat_changes = self.p2.stat_stages.get("speed", 0)
+        attacking_stat_changes = self.p1.stat_stages["speed"]
+        defending_stat_changes = self.p2.stat_stages["speed"]
 
-        p1_final_speed = stat_modifier(num_stages=p1_stat_changes, stat=p1_speed)
-        p2_final_speed = stat_modifier(num_stages=p2_stat_changes, stat=p2_speed)
+        p1_final_speed = stat_modifier(num_stages=attacking_stat_changes, stat=p1_speed)
+        p2_final_speed = stat_modifier(num_stages=defending_stat_changes, stat=p2_speed)
 
         result = {
             "p1": self.p1.name,
             "p2": self.p2.name,
             "p1_final_speed": p1_final_speed,
             "p2_final_speed": p2_final_speed,
-            "p1_stat_changes": p1_stat_changes,  # This was the key issue
-            "p2_stat_changes": p2_stat_changes,
+            "p1_stat_changes": attacking_stat_changes,
+            "p2_stat_changes": defending_stat_changes,
             "p1_ev": self.p1.evs["speed"] if self.p1.evs else 0,
             "p2_ev": self.p2.evs["speed"] if self.p2.evs else 0,
         }
@@ -245,12 +246,8 @@ class GameState(BaseModel):
         defending_stat = "defense" if category == "physical" else "special-defense"
 
         # pull stat changes and stats from pokemon
-        attacking_stat_changes = (
-            0 if self.p1.stat_stages is None else self.p1.stat_stages[attacking_stat]
-        )
-        defending_stat_changes = (
-            0 if self.p2.stat_stages is None else self.p2.stat_stages[defending_stat]
-        )
+        attacking_stat_changes = self.p1.stat_stages[attacking_stat]
+        defending_stat_changes = self.p2.stat_stages[defending_stat]
 
         attacking_stat = stat_modifier(
             num_stages=attacking_stat_changes,
